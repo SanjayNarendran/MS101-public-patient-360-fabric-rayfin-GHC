@@ -32,8 +32,15 @@ SYNTHEA = ROOT / "work" / "synthea"
 
 HTTP = requests.Session()
 HTTP.mount("https://", HTTPAdapter(max_retries=Retry(
-    total=6, connect=6, read=6, backoff_factor=2, allowed_methods=None, status_forcelist=[429, 500, 502, 503, 504],
+    total=4, connect=0, read=4, backoff_factor=2, allowed_methods=None, status_forcelist=[429, 500, 502, 503, 504],
 )))
+# Connect and read timeouts: fail fast when a host is unreachable, but allow slow transfers.
+TIMEOUT = (6, 120)
+# Landing pages for a manual download if a direct link fails.
+LANDING = {
+    "TCGA_Reports.csv.zip": "https://doi.org/10.17632/hyg5xkznpx.1",
+    "synthea-with-dependencies.jar": "https://github.com/synthetichealth/synthea/releases",
+}
 
 TCGA_REPORTS = (
     "https://data.mendeley.com/public-files/datasets/hyg5xkznpx/files/60abe141-9352-4a54-943c-3d015eabefea/file_downloaded",
@@ -71,16 +78,18 @@ def fetch(url: str, dest: pathlib.Path, expected: str | None = None) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     print(f"get  {dest.relative_to(ROOT)} <- {url}", flush=True)
-    for attempt in range(5):
+    for attempt in range(2):
         try:
-            with HTTP.get(url, stream=True, timeout=120) as r:
+            with HTTP.get(url, stream=True, timeout=TIMEOUT) as r:
                 r.raise_for_status()
                 with tmp.open("wb") as f:
                     shutil.copyfileobj(r.raw, f, 1 << 20)
             break
-        except requests.ConnectionError:
-            if attempt == 4:
-                raise
+        except requests.ConnectionError as e:
+            if attempt == 1:
+                page = LANDING.get(dest.name, "https://gdc.cancer.gov/about-data/publications/panimmune")
+                raise SystemExit(f"Could not download {dest.name} ({e.__class__.__name__}). Download it from {page} "
+                                 f"and save it as {dest.relative_to(ROOT)}, then run this again.") from None
             time.sleep(5 * (attempt + 1))
     if expected and sha256(tmp) != expected:
         print(f"  warning: {dest.name} differs from the file this demo was built with (SHA-256 mismatch)")
