@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "2.0",
+  "functions": [
+    {
+      "functionName": "getCohort",
+      "delegateParameters": [
+        {
+          "name": "ctx",
+          "type": "RayfinContext<AppSchema, AudienceType.Sql | AudienceType.Storage>",
+          "optional": false,
+          "hasDefault": false,
+          "position": 0,
+          "isFabricParameter": false
+        }
+      ],
+      "contextAudiences": [
+        "Sql",
+        "Storage"
+      ]
+    },
+    {
+      "functionName": "getPatient",
+      "delegateParameters": [
+        {
+          "name": "patientId",
+          "type": "string",
+          "optional": false,
+          "hasDefault": false,
+          "position": 0,
+          "isFabricParameter": false
+        },
+        {
+          "name": "ctx",
+          "type": "RayfinContext<AppSchema, AudienceType.Sql | AudienceType.Storage>",
+          "optional": false,
+          "hasDefault": false,
+          "position": 1,
+          "isFabricParameter": false
+        }
+      ],
+      "contextAudiences": [
+        "Sql",
+        "Storage"
+      ]
+    },
+    {
+      "functionName": "getDataMap",
+      "delegateParameters": [
+        {
+          "name": "ctx",
+          "type": "RayfinContext<AppSchema, AudienceType.Fabric | AudienceType.Sql>",
+          "optional": false,
+          "hasDefault": false,
+          "position": 0,
+          "isFabricParameter": false
+        }
+      ],
+      "contextAudiences": [
+        "Fabric",
+        "Sql"
+      ]
+    }
+  ]
+}

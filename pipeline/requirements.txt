@@ -1,0 +1,17 @@
+idc-index>=0.13
+pandas>=2.2
+pyarrow>=17
+duckdb>=1.1
+requests>=2.32
+azure-identity>=1.19
+azure-storage-file-datalake>=12.17
+deltalake>=0.22
+openslide-python>=1.4
+openslide-bin>=4.0
+SimpleITK>=2.4
+nibabel>=5.2
+pydicom>=3.0
+numpy>=2.0
+Pillow>=10.4
+openpyxl>=3.1
+scipy>=1.13
