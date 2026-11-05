@@ -30,7 +30,10 @@ Entra SSO; `rayfin dev` signs in locally with the Rayfin CLI login (dev-only dyn
 - `pipeline/` – Python data pipeline: cohort, downloads (`download_sources.py`: TCGA-Reports, GDC PanImmune files,
   Synthea jar; `download_imaging.py`: GDC slides, IDC CT/MR/SEG/TIL), clinical and genomics fetch (GDC, cBioPortal),
   Synthea background, slide tiling, radiology, tables, OneLake upload and shortcuts (IDs from `fabric.env` via
-  `fabric_config.py`), `summaries.json`
+  `fabric_config.py`), `summaries.json`, `run_all.py` (README steps 5–6 in order)
+- `scripts/cloud_load.py` – optional: runs `run_all.py` on a temporary Azure VM (managed identity, no public inbound
+  ports; `cloud_load.sh` is the VM's job). Resource-group tags record the workspace and principal before the grant;
+  cleanup verifies the recorded workspace role is gone before deleting the group. Requires workspace Admin.
 - `scripts/setup_fabric.py` – finds or creates the workspace and four Lakehouses; writes `fabric.env`,
   `.env.production.local` (`VITE_FABRIC_WORKSPACE_*`, the header link) and the `<fabric-config>` block in
   `function_app.ts`. That block is committed only with zero GUIDs

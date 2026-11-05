@@ -158,14 +158,26 @@ def fabric(method: str, path: str, **kw) -> requests.Response:
 
 
 def wait(resp: requests.Response) -> None:
+    if resp.status_code != 202:
+        return
     op = resp.headers.get("Location")
-    while resp.status_code == 202 and op:
+    if not op:
+        raise RuntimeError("Fabric accepted the operation without a status URL")
+    deadline = time.monotonic() + 30 * 60
+    while time.monotonic() < deadline:
         time.sleep(3)
         r = requests.get(op, headers={"Authorization": f"Bearer {token('https://api.fabric.microsoft.com/.default')}"}, timeout=60)
-        status = r.json().get("status")
-        if status in ("Succeeded", "Failed", "Completed"):
+        r.raise_for_status()
+        result = r.json()
+        status = result.get("status")
+        if status in ("Succeeded", "Completed"):
             print(f"operation {status}")
             return
+        if status in ("Failed", "Cancelled", "Canceled"):
+            raise RuntimeError(f"Fabric operation {status}: {result.get('error', 'no error details provided')}")
+        if status not in ("NotStarted", "Running"):
+            raise RuntimeError(f"Unexpected Fabric operation status: {status!r}")
+    raise RuntimeError("Timed out waiting for the Fabric operation after 30 minutes")
 
 
 def shortcuts(tables: list[tuple[str, str]]) -> None:
@@ -178,6 +190,21 @@ def shortcuts(tables: list[tuple[str, str]]) -> None:
     resp = fabric("POST", f"/workspaces/{WORKSPACE_ID}/items/{PATIENT360}/shortcuts/bulkCreate?shortcutConflictPolicy=CreateOrOverwrite",
                   json={"createShortcutRequests": requests_})
     wait(resp)
+    if resp.status_code == 202:
+        resp = requests.get(f"{resp.headers['Location'].rstrip('/')}/result",
+                            headers={"Authorization": f"Bearer {token('https://api.fabric.microsoft.com/.default')}"},
+                            timeout=60)
+        resp.raise_for_status()
+    results = resp.json().get("value")
+    if not isinstance(results, list):
+        raise RuntimeError("Fabric did not return per-shortcut results")
+    expected = {(r["path"], r["name"]) for r in requests_}
+    succeeded = {(r.get("request", {}).get("path"), r.get("request", {}).get("name"))
+                 for r in results if r.get("status") == "Succeeded"}
+    if len(results) != len(expected) or succeeded != expected:
+        failures = [r for r in results if r.get("status") != "Succeeded"]
+        raise RuntimeError(f"Fabric shortcut creation was incomplete; missing: {sorted(expected - succeeded)}; "
+                           f"failed results: {failures}")
     print(f"{len(requests_)} shortcuts in patient360")
     resp = fabric("POST", f"/workspaces/{WORKSPACE_ID}/sqlEndpoints/{SQL_ENDPOINT}/refreshMetadata", json={})
     wait(resp)

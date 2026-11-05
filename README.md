@@ -253,6 +253,11 @@ python3 -m venv .venv
 Check that `npx rayfin --version` prints a version and that `.venv/bin/python -c "import openslide, SimpleITK, idc_index"`
 exits cleanly.
 
+For the [Azure loader](#steps-56-on-azure-instead-optional), replace the Python requirements install above with
+`.venv/bin/pip install azure-identity requests cryptography`. Skip the imaging-import check. Java, AzCopy, the imaging
+libraries and the large data files stay on the VM. Node.js, Python, Git and Azure CLI are still needed on your machine.
+On Windows, use `.venv\Scripts\python.exe` and `.venv\Scripts\pip.exe` instead of `.venv/bin/python` and `.venv/bin/pip`.
+
 ### Step 3 — Sign in (Fabric only)
 
 ```bash
@@ -278,7 +283,7 @@ Contributor).
 
 The script finds or creates the workspace, assigns a capacity if it has none, creates `clinical_lakehouse`,
 `genomics_lakehouse`, `imaging_lakehouse` and `patient360`, waits for `patient360`'s SQL analytics endpoint, and
-writes the IDs to three places, all kept out of git:
+writes the IDs to three places. Keep these deployment-specific values out of commits:
 
 - `fabric.env` at the repository root, read by `pipeline/upload_onelake.py`
 - the `<fabric-config>` block in `rayfin/functions/src/function_app.ts`, used by the deployed functions
@@ -317,6 +322,81 @@ Everything lands in `work/`, which is git-ignored. Downloads skip files that alr
 - **`--skip-raw`:** `upload_onelake.py` also copies the original SVS and DICOM files into `Files/raw/` for lineage.
   Add `--skip-raw` to save about 34 GB of OneLake storage.
 - **Check:** in Fabric, `patient360` shows 32 shortcuts and its SQL analytics endpoint lists the tables.
+
+### Steps 5–6 on Azure instead (optional)
+
+Steps 5 and 6 move about 35 GB and tile the slides, which can take many hours on a small machine or slow connection.
+`scripts/cloud_load.py` runs them on a temporary Azure VM that loads straight into OneLake. The other steps stay where
+they are: prepare Fabric with step 4, run the loader instead of steps 5 and 6, then deploy Rayfin with step 7 and check
+the app with step 8. `pipeline/run_all.py` runs steps 5 and 6 locally when you prefer that path.
+
+The VM reuses the existing Python, Java, native imaging libraries and AzCopy pipeline without a Spark rewrite or
+competing with the app for Fabric compute. Fabric notebooks are an alternative for recurring workloads, but need
+separate validation of these dependencies, scratch disk and capacity; they are not a drop-in replacement here.
+
+Before you start:
+
+- Complete steps 2 through 4 with the same tenant for Azure and Fabric. You must be **Admin** of the workspace;
+  [Fabric requires Admin to remove workspace roles](https://learn.microsoft.com/en-us/rest/api/fabric/core/workspaces/delete-workspace-role-assignment).
+- You need Azure permissions to create and delete the resource group, VM, network, disk and shutdown schedule, and
+  to invoke VM Run Command. The Fabric tenant setting *Service principals can use Fabric APIs* must cover the VM's
+  managed identity. The loader does not change tenant settings.
+- Choose a region and an available x64 VM size with enough vCPU quota. The defaults are Ubuntu 24.04,
+  `Standard_D16s_v5` and a 256 GB OS disk. Prefer the Fabric capacity's region. Azure policy must allow a public IP
+  for outbound access; this version does not configure private endpoints or bypass policy.
+- Push the commit to a trusted public HTTPS repository. The VM clones `origin` at your current commit; uncommitted changes
+  are not copied. Use `--repo` and `--ref` for another public fork and pushed commit. Do not put credentials in the URL.
+
+**Use a dedicated demo workspace.** The existing uploader overwrites the demo tables and same-name shortcuts.
+Cleanup removes temporary Azure resources and access, not data already written to Fabric.
+
+```bash
+az login
+az account set --subscription "<subscription-id>"
+
+# Run the default diagnostic-slide load.
+.venv/bin/python scripts/cloud_load.py up --location "<region>"
+
+# Alternative: include frozen sections and omit raw imaging from OneLake.
+.venv/bin/python scripts/cloud_load.py up --location "<region>" -- --tissue-slides --skip-raw
+
+# If you interrupted the wait, inspect the run and clean up when finished.
+.venv/bin/python scripts/cloud_load.py status
+.venv/bin/python scripts/cloud_load.py down
+```
+
+Choose one `up` command, not both. `--skip-raw` saves OneLake storage; it does not skip the downloads needed to build
+the images. Use `--resource-group "<name>"` on **all three commands** for a name other than `p360-loader`. Select the
+same Azure subscription before later `status` or `down` commands. An existing resource group is never reused by `up`.
+
+The VM uses its own managed identity and has no public inbound ports. Your Azure and Rayfin credentials stay on
+your machine. The loader discards the private SSH key and manages the VM through Azure Run Command. It records
+`p360-loader`, `p360-workspace` and `p360-principal` tags on its resource group before granting Fabric access.
+Do not edit these tags or add unrelated resources to that group.
+
+`up` waits for completion and calls `down` on success. A failed stage, failed shortcut result, boot error or timeout
+leaves the group intact for inspection. `status` shows the state and a bounded log tail. Runs are not automatically
+resumed after failure or reboot: inspect the error, run `down`, then start a fresh run. The shared local runner can
+reuse files that its individual pipeline scripts already know how to skip.
+
+`down` uses the recorded workspace and principal, even if `fabric.env` changes or the VM was deleted separately.
+It deletes the principal's workspace assignments by assignment ID and verifies their removal before deleting the
+resource group. Failed cleanup stops with an error; resolve it and retry `down`. The Fabric capacity, Lakehouses and
+Rayfin app remain in place.
+
+**Cost control:** the VM has an auto-shutdown time about six hours after provisioning. Downloads can dominate runtime.
+Shutdown stops VM compute, but disk, public IP and Fabric charges remain. If you close the controller or interrupt
+its wait, it cannot perform automatic cleanup; run `down` yourself. See Azure pricing for your chosen region and size.
+
+For code changes, run the focused checks with the full `pipeline/requirements.txt` installed:
+
+```bash
+python -m unittest discover -s scripts -p "test_cloud_load.py"
+python -m unittest discover -s pipeline -p "test_upload_onelake.py"
+```
+
+These checks use mocked cloud APIs. With Bash installed, they also execute the Linux status script against local
+fixtures. They do not replace a live run in a disposable demo workspace and the app checks in step 8.
 
 ### Step 7 — Deploy the app (Fabric only)
 
@@ -553,10 +633,11 @@ npm run preview:local  # the optimised production build, still from work/ (http:
 
 - `scripts/setup_fabric.py` – workspace, capacity and the four Lakehouses; writes `fabric.env`, `.env.production.local`
   and the function config block
+- `scripts/cloud_load.py` – optional: runs steps 5–6 on a temporary Azure VM (`cloud_load.sh` is the VM's job)
 - `pipeline/` – cohort (`cohort.json`, `select_cohort.py`), downloads (`download_sources.py`, `download_imaging.py`,
   `fetch_clinical_genomics.py`), Synthea background, slide tiling and TIL overlays, radiology conversion and AI
   segmentations, table building, OneLake upload and shortcuts (`upload_onelake.py`, `fabric_config.py`),
-  `summaries.json`
+  `summaries.json`, `run_all.py` (steps 5–6 in order)
 - `rayfin/rayfin.yml` – Rayfin config (Fabric SSO, data, functions, protected static hosting)
 - `rayfin/data/TumorBoardNote.ts` – the app's only entity; author-only update and delete; optional `eventId` ties a
   note to a timeline event
