@@ -10,7 +10,8 @@ exec >> /var/log/p360-loader.log 2>&1
 
 git clone -q "$1" /opt/p360
 cd /opt/p360
-git checkout -q "$2"
+git fetch -q origin "$2"
+git checkout -q --detach FETCH_HEAD
 shift 2
 cp /var/lib/p360/fabric.env fabric.env
 python3 -m venv .venv

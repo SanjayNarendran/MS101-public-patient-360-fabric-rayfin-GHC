@@ -346,6 +346,8 @@ Before you start:
   for outbound access; this version does not configure private endpoints or bypass policy.
 - Push the commit to a trusted public HTTPS repository. The VM clones `origin` at your current commit; uncommitted changes
   are not copied. Use `--repo` and `--ref` for another public fork and pushed commit. Do not put credentials in the URL.
+  The VM explicitly fetches the requested ref before checking it out, including commits published only through a
+  pull-request ref. The ref must be fetchable from the selected repository; use `--repo` for an unsubmitted fork.
 
 **Use a dedicated demo workspace.** The existing uploader overwrites the demo tables and same-name shortcuts.
 Cleanup removes temporary Azure resources and access, not data already written to Fabric.

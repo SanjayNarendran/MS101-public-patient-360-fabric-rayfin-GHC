@@ -28,6 +28,37 @@ class CloudConfigTests(unittest.TestCase):
                                                     "abc123", "--skip-raw"])
 
 
+class CheckoutTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("bash") and shutil.which("git"), "Bash and Git are required")
+    def test_checks_out_a_commit_available_only_through_a_pull_request_ref(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source = root / "source"
+
+            def git(*args):
+                return subprocess.run(["git", "-C", str(source), *args], check=True,
+                                      capture_output=True, text=True).stdout.strip()
+
+            subprocess.run(["git", "init", "-q", "--initial-branch=main", str(source)], check=True)
+            for message in ("base", "pull request"):
+                git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-q", "--allow-empty", "-m", message)
+            commit = git("rev-parse", "HEAD")
+            git("update-ref", "refs/pull/1/head", commit)
+            git("update-ref", "refs/heads/main", git("rev-parse", "HEAD~1"))
+            script = (cloud_load.ROOT / "scripts" / "cloud_load.sh").read_text().split("\nshift 2", 1)[0]
+            script = script.replace("/var/lib/p360/state", f'"{(root / "state").as_posix()}"')
+            script = script.replace("/var/log/p360-loader.log", f'"{(root / "loader.log").as_posix()}"')
+            script = script.replace("/opt/p360", "clone")
+            result = subprocess.run([shutil.which("bash"), "-c", script, "cloud_load.sh", source.as_uri(), commit],
+                                    cwd=root, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, (root / "loader.log").read_text())
+            actual = subprocess.run(["git", "-C", str(root / "clone"), "rev-parse", "HEAD"],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+            self.assertEqual(actual, commit)
+            self.assertEqual((root / "state").read_text().strip(), "DONE")
+
+
 class UpTests(unittest.TestCase):
     def setUp(self):
         self.fabric = self.enterContext(patch("cloud_load.Fabric")).return_value
